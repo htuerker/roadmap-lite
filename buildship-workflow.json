@@ -1,102 +1,101 @@
 {
   "nodes": [
     {
-      "description": "This is blank script node to help you get started.",
-      "version": "1.0.0",
-      "_libRef": {
-        "libType": "private",
-        "libNodeRefId": "@buildship-7y1dn8/roadmap-api",
-        "isDirty": true,
-        "version": "1.0.0",
-        "integrity": "v3:4dea0fdf2bcb5f6737c44c3ea050ded5"
+      "meta": {
+        "description": "This is blank script node to help you get started. [Full Documentation](https://docs.buildship.com/core-nodes/script).",
+        "id": "roadmap-api",
+        "name": "Roadmap API"
       },
-      "onFail": null,
-      "type": "script",
-      "script": "import { Firestore, FieldValue } from '@google-cloud/firestore';\n\nconst firestore = new Firestore(undefined);\n\nconst RoadmapItem = {\n  fromFirestore: (snapshot) => {\n    const data = snapshot.data();\n    console.log(data);\n    return {\n      id: snapshot.ref.id,\n      feature: data.feature,\n      description: data.description,\n      status: data.status,\n      targetRelease: data.targetRelease ? data.targetRelease.toDate ? data.targetRelease.toDate() : undefined : undefined,\n      votesSummary: data.votesSummary,\n      _createdBy: data._createdBy,\n      _updatedBy: data._updatedBy\n    }\n  },\n}\n\nconst Vote = {\n  fromFirestore: (snapshot) => {\n    const data = snapshot.data();\n    return {\n      vote: data.vote,\n      comment: data.comment,\n      email: data.email,\n    }\n  }\n}\n\nconst TimelogItem = {\n  fromFirestore: (snapshot) => {\n    const data = snapshot.data();\n    return {\n      actor: data.actor,\n      changedFields: data.changedFields\n    }\n  }\n}\n\nasync function getSchema({ tableId, collection, name }) {\n  const settingsRef = firestore.collection(\"_rowy_\").doc(\"settings\");\n  const schemaRef = settingsRef.collection(\"schema\").doc(tableId);\n  const votesSchemaRef = schemaRef.collection(\"subTables\").doc(\"votes\");\n  \n  const schemaSnapshot = await schemaRef.get();\n  if(schemaSnapshot.exists) {\n    return schemaSnapshot.data();\n  }\n  const settings = tableSettings({ tableId, collection, name });\n  console.log(\"settings: \", settings);\n  await Promise.all([\n    settingsRef.update({ tables: FieldValue.arrayUnion(settings) }, { merge: true }),\n    schemaRef.set(roadmapSchema),\n    votesSchemaRef.set(votesSchema)\n  ])\n  return roadmapSchema;\n}\n\nasync function getStatusOptions({ tableId, collection, name }) {\n  const schema = await getSchema({ tableId, collection, name });\n  return schema.columns.status.config.options;\n}\n\nasync function listItems({ status, collection }) {\n  const itemsRef = status ? \n    firestore.collection(collection).where(\"status\", \"==\", status) : \n    firestore.collection(collection);\n\n  const snapshot = await itemsRef.get();\n  return snapshot.docs.map(RoadmapItem.fromFirestore);\n}\n\nasync function getItem({ itemId, collection }) {\n  const itemRef = firestore.collection(collection).doc(itemId);\n  const votesRef = firestore.collection(collection).doc(itemId).collection(\"votes\");\n  const [itemSnapshot, votesSnapshot] = await Promise.all([itemRef.get(), votesRef.get()]);\n  \n  const item = RoadmapItem.fromFirestore(itemSnapshot);\n  const votes = votesSnapshot.docs.map(Vote.fromFirestore);\n  return { ...item, votes }\n}\n\nasync function createVote({ collection, itemId, vote }) {\n  const itemRef = firestore.collection(collection).doc(itemId);\n  const votesRef = firestore.collection(collection).doc(itemId).collection(\"votes\");\n  \n  return Promise.all([\n    votesRef.add({\n      vote: vote.vote,\n      comment: vote.comment,\n      email: vote.email,\n    }),\n    itemRef.update({\n      [`votesSummary.${vote.vote}`]: FieldValue.increment(1),\n    })\n  ]);\n}\n\nexport default async ({ tableId, collection, name },{ logging, request }) => {\n  let data;\n  try {\n    const { method, options } = request.body;\n    switch(method) {\n      case \"getStatusOptions\":\n        data = await getStatusOptions({ tableId, collection, name });\n        console.log(\"data: \", data);\n        return { success: true, data };\n      case \"listItems\":\n        data = await listItems({ collection, status: options.status });\n        return { success: true, data };\n      case \"getItem\":\n        data = await getItem({ collection, itemId: options.itemId });\n        return { success: true, data };\n      case \"createVote\":\n        await createVote({ collection, itemId: options.itemId, vote: options.vote });\n        return { success: true }\n        break;\n      default:\n        return { success: false, error: \"Unsupported method\" };\n    }\n  } catch(error) {\n    return { success: false, error }\n  }\n}\n\nconst roadmapSchema = {\n  \"columns\": {\n    \"description\": {\n      \"config\": {},\n      \"fieldName\": \"description\",\n      \"index\": 1,\n      \"key\": \"description\",\n      \"name\": \"Description\",\n      \"type\": \"LONG_TEXT\"\n    },\n    \"feature\": {\n      \"config\": {\n        \"required\": true\n      },\n      \"fieldName\": \"feature\",\n      \"fixed\": true,\n      \"index\": 0,\n      \"key\": \"feature\",\n      \"name\": \"Feature\",\n      \"type\": \"SIMPLE_TEXT\"\n    },\n    \"status\": {\n      \"config\": {\n        \"colors\": [\n          {\n            \"dark\": \"#2e7d32\",\n            \"light\": \"#4caf50\",\n            \"main\": \"#388e3c\",\n            \"name\": \"complete\"\n          },\n          {\n            \"dark\": \"#d07e04\",\n            \"light\": \"#ffeb3b\",\n            \"main\": \"#fbc02d\",\n            \"name\": \"in_progress\"\n          },\n          {\n            \"dark\": \"#007fc5\",\n            \"light\": \"#03a9f4\",\n            \"main\": \"#0b8ed6\",\n            \"name\": \"next\"\n          },\n          {\n            \"dark\": \"#c0360a\",\n            \"light\": \"#ff5722\",\n            \"main\": \"#e64a19\",\n            \"name\": \"need_feedback\"\n          }\n        ],\n        \"freeText\": true,\n        \"options\": [\"Need feedback\", \"Next\", \"In Progress\", \"Complete\"]\n      },\n      \"fieldName\": \"status\",\n      \"index\": 2,\n      \"key\": \"status\",\n      \"name\": \"Status\",\n      \"type\": \"SINGLE_SELECT\"\n    },\n    \"targetRelease\": {\n      \"config\": {\n        \"format\": \"MMM yy\"\n      },\n      \"fieldName\": \"targetRelease\",\n      \"index\": 3,\n      \"key\": \"targetRelease\",\n      \"name\": \"Target Release\",\n      \"type\": \"DATE\"\n    },\n    \"timelog\": {\n      \"config\": {\n        \"parentLabel\": [\"feature\"]\n      },\n      \"fieldName\": \"timelog\",\n      \"index\": 7,\n      \"key\": \"timelog\",\n      \"name\": \"Timelog\",\n      \"type\": \"SUB_TABLE\"\n    },\n    \"totalVotes\": {\n      \"config\": {\n        \"formulaFn\": \"const formula:Formula = async ({ row })=> {\\n  // WRITE YOUR CODE ONLY BELOW THIS LINE. DO NOT WRITE CODE/COMMENTS OUTSIDE THE FUNCTION BODY\\n  return row.votesSummary.Yes-row.votesSummary.Meh+row.votesSummary.Urgent*2\\n  // Example:\\n  // return row.a + row.b;\\n  // WRITE YOUR CODE ONLY ABOVE THIS LINE. DO NOT WRITE CODE/COMMENTS OUTSIDE THE FUNCTION BODY\\n}\\n\",\n        \"listenerFields\": [\"votesSummary\"],\n        \"renderFieldType\": \"NUMBER\"\n      },\n      \"fieldName\": \"totalVotes\",\n      \"index\": 4,\n      \"key\": \"totalVotes\",\n      \"name\": \"Total Votes\",\n      \"type\": \"FORMULA\"\n    },\n    \"votesSummary\": {\n      \"config\": {\n        \"defaultValue\": {\n          \"type\": \"static\",\n          \"value\": {\n            \"Meh\": 0,\n            \"Urgent\": 0,\n            \"Yes\": 0,\n            \"votesCount\": 0\n          }\n        }\n      },\n      \"fieldName\": \"votesSummary\",\n      \"index\": 5,\n      \"key\": \"votesSummary\",\n      \"name\": \"votesSummary\",\n      \"type\": \"JSON\"\n    },\n    \"_createdBy\": {\n      \"config\": {},\n      \"fieldName\": \"_createdBy\",\n      \"index\": 9,\n      \"key\": \"_createdBy\",\n      \"name\": \"Created By\",\n      \"type\": \"CREATED_BY\"\n    },\n    \"_updatedBy.timestamp\": {\n      \"config\": {},\n      \"fieldName\": \"_updatedBy.timestamp\",\n      \"index\": 11,\n      \"key\": \"_updatedBy.timestamp\",\n      \"name\": \"Updated At\",\n      \"type\": \"UPDATED_AT\"\n    },\n    \"votes\": {\n      \"config\": {\n        \"parentLabel\": [\"feature\"]\n      },\n      \"fieldName\": \"votes\",\n      \"index\": 6,\n      \"key\": \"votes\",\n      \"name\": \"Votes\",\n      \"type\": \"SUB_TABLE\"\n    },\n    \"_createdBy.timestamp\": {\n      \"config\": {},\n      \"fieldName\": \"_createdBy.timestamp\",\n      \"index\": 10,\n      \"key\": \"_createdBy.timestamp\",\n      \"name\": \"Created At\",\n      \"type\": \"CREATED_AT\"\n    },\n    \"_updatedBy\": {\n      \"config\": {},\n      \"fieldName\": \"_updatedBy\",\n      \"index\": 8,\n      \"key\": \"_updatedBy\",\n      \"name\": \"Updated By\",\n      \"type\": \"UPDATED_BY\"\n    }\n  },\n  \"rowHeight\": 65,\n};\n\nconst votesSchema = {\n  \"columns\": {\n    \"comment\": {\n      \"config\": {},\n      \"fieldName\": \"comment\",\n      \"index\": 1,\n      \"key\": \"comment\",\n      \"name\": \"Comment\",\n      \"type\": \"LONG_TEXT\"\n    },\n    \"vote\": {\n      \"config\": {\n        \"colors\": [\n          {\n            \"dark\": \"#0a59a8\",\n            \"light\": \"#2196f3\",\n            \"main\": \"#1976d2\",\n            \"name\": \"urgent\"\n          },\n          {\n            \"dark\": \"#c0360a\",\n            \"light\": \"#ff5722\",\n            \"main\": \"#e64a19\",\n            \"name\": \"meh\"\n          },\n          {\n            \"dark\": \"#258493\",\n            \"light\": \"#00bcd4\",\n            \"main\": \"#0097a7\",\n            \"name\": \"yes\"\n          },\n        ],\n        \"options\": [\"Urgent\", \"Meh\", \"Yes\"]\n      },\n      \"fieldName\": \"vote\",\n      \"index\": 0,\n      \"key\": \"vote\",\n      \"name\": \"vote\",\n      \"type\": \"SINGLE_SELECT\"\n    },\n    \"targetRelease\": {\n      \"config\": {},\n      \"fieldName\": \"email\",\n      \"index\": 2,\n      \"key\": \"email\",\n      \"name\": \"Email\",\n      \"type\": \"EMAIL\"\n    },\n  },\n  \"rowHeight\": 65,\n}\n\nconst tableSettings = ({ tableId, collection, name }) => ({\n  \"id\": tableId,\n  \"collection\": collection,\n  \"name\": name || \"Roadmap\",\n  \"audit\": true,\n  \"auditFieldCreatedBy\": \"_createdBy\",\n  \"auditFieldUpdatedBy\": \"_updatedBy\",\n  \"description\": \"Roadmap voting app to collect votes and feedback from your users.\",\n  \"details\": \"Full setup [documentation](https://github.com/rowyio/roadmap)\\n\\nTry [Roadmap App](https://roadmap.rowy.io/)\\n\\n**Notes**\\n- Change the `Status` column settings to add any category\\n- Subtable`Votes` has the individual user votes for a feature\",\n  \"readOnly\": false,\n  \"roles\": [\"ADMIN\", \"EDITOR\", \"OWNER\"],\n  \"section\": \"Demo App 🎭\",\n  \"tableType\": \"primaryCollection\",\n  \"thumbnailURL\": \"https://firebasestorage.googleapis.com/v0/b/tryrowy.appspot.com/o/__thumbnails__%2Froadmap?alt=media&token=cde9910e-9b8c-4e0e-8ffa-237b52d16e8f\"\n});\n",
-      "dependencies": { "@google-cloud/firestore": "7.3.0" },
-      "inputs": {
+      "id": "1707770335047",
+      "output": {
+        "buildship": { "index": 0 },
+        "description": "",
+        "title": "output",
         "type": "object",
-        "required": [],
         "properties": {
-          "collection": {
-            "pattern": "",
-            "title": "Collection",
-            "type": "string",
-            "description": "",
-            "default": "",
-            "buildship": { "index": 0, "sensitive": false }
+          "data": {
+            "title": "data",
+            "buildship": { "index": 0 },
+            "description": ""
           },
-          "name": {
-            "title": "Name",
-            "type": "string",
-            "pattern": "",
-            "description": "",
-            "default": "",
-            "buildship": { "sensitive": false, "index": 2 }
-          },
-          "tableId": {
-            "pattern": "",
-            "default": "",
-            "title": "Table Id",
-            "buildship": { "index": 1, "sensitive": false },
-            "type": "string",
+          "error": {
+            "title": "error",
+            "buildship": { "index": 1 },
             "description": ""
           }
         }
       },
+      "type": "script",
+      "dependencies": { "@google-cloud/firestore": "7.3.0" },
+      "description": "This is blank script node to help you get started.",
       "label": "Roadmap API",
-      "output": {
-        "properties": {
-          "data": {
-            "description": "",
-            "buildship": { "index": 0 },
-            "title": "data"
-          },
-          "error": {
-            "description": "",
-            "buildship": { "index": 1 },
-            "title": "error"
-          }
-        },
-        "buildship": { "index": 0 },
-        "type": "object",
-        "title": "output",
-        "description": ""
-      },
-      "meta": {
-        "id": "roadmap-api",
-        "name": "Roadmap API",
-        "description": "This is blank script node to help you get started. [Full Documentation](https://docs.buildship.com/core-nodes/script)."
-      },
-      "id": "1707770335047"
-    },
-    {
-      "type": "return",
-      "description": "The Return Node is used to return values from the workflow. It is generally the last node in the workflow. The return node is optional as the API can inherently return a 200 OK response by default. [Full Documentation](https://docs.buildship.com/core-nodes/return).",
-      "id": "1707613794785",
+      "onFail": null,
       "inputs": {
         "required": [],
+        "properties": {
+          "name": {
+            "buildship": { "index": 2, "sensitive": false },
+            "type": "string",
+            "default": "",
+            "pattern": "",
+            "description": "",
+            "title": "Name"
+          },
+          "tableId": {
+            "default": "",
+            "title": "Table Id",
+            "type": "string",
+            "buildship": { "sensitive": false, "index": 1 },
+            "description": "",
+            "pattern": ""
+          },
+          "collection": {
+            "default": "",
+            "pattern": "",
+            "type": "string",
+            "description": "",
+            "buildship": { "sensitive": false, "index": 0 },
+            "title": "Collection"
+          }
+        },
+        "type": "object"
+      },
+      "version": "1.0.0",
+      "_libRef": {
+        "libNodeRefId": "@buildship-7y1dn8/roadmap-api",
+        "version": "1.0.0",
+        "integrity": "v3:4dea0fdf2bcb5f6737c44c3ea050ded5",
+        "isDirty": true,
+        "libType": "private"
+      },
+      "script": "import { Firestore, FieldValue } from '@google-cloud/firestore';\n\nconst firestore = new Firestore(undefined);\n\nconst RoadmapItem = {\n  fromFirestore: (snapshot) => {\n    const data = snapshot.data();\n    console.log(data);\n    return {\n      id: snapshot.ref.id,\n      feature: data.feature,\n      description: data.description,\n      status: data.status,\n      targetRelease: data.targetRelease ? data.targetRelease.toDate ? data.targetRelease.toDate() : undefined : undefined,\n      votesSummary: data.votesSummary,\n      _createdBy: data._createdBy,\n      _updatedBy: data._updatedBy\n    }\n  },\n}\n\nconst Vote = {\n  fromFirestore: (snapshot) => {\n    const data = snapshot.data();\n    return {\n      vote: data.vote,\n      comment: data.comment,\n      email: data.email,\n    }\n  }\n}\n\nconst TimelogItem = {\n  fromFirestore: (snapshot) => {\n    const data = snapshot.data();\n    return {\n      actor: data.actor,\n      changedFields: data.changedFields\n    }\n  }\n}\n\nasync function getSchema({ tableId, collection, name }) {\n  const settingsRef = firestore.collection(\"_rowy_\").doc(\"settings\");\n  const schemaRef = settingsRef.collection(\"schema\").doc(tableId);\n  const votesSchemaRef = schemaRef.collection(\"subTables\").doc(\"votes\");\n  \n  const schemaSnapshot = await schemaRef.get();\n  if(schemaSnapshot.exists) {\n    return schemaSnapshot.data();\n  }\n  const settings = tableSettings({ tableId, collection, name });\n  console.log(\"settings: \", settings);\n  await Promise.all([\n    settingsRef.update({ tables: FieldValue.arrayUnion(settings) }, { merge: true }),\n    schemaRef.set(roadmapSchema),\n    votesSchemaRef.set(votesSchema)\n  ])\n  return roadmapSchema;\n}\n\nasync function getStatusOptions({ tableId, collection, name }) {\n  const schema = await getSchema({ tableId, collection, name });\n  return schema.columns.status.config.options;\n}\n\nasync function listItems({ status, collection }) {\n  const itemsRef = status ? \n    firestore.collection(collection).where(\"status\", \"==\", status) : \n    firestore.collection(collection);\n\n  const snapshot = await itemsRef.get();\n  return snapshot.docs.map(RoadmapItem.fromFirestore);\n}\n\nasync function getItem({ itemId, collection }) {\n  const itemRef = firestore.collection(collection).doc(itemId);\n  const votesRef = firestore.collection(collection).doc(itemId).collection(\"votes\");\n  const [itemSnapshot, votesSnapshot] = await Promise.all([itemRef.get(), votesRef.get()]);\n  \n  const item = RoadmapItem.fromFirestore(itemSnapshot);\n  const votes = votesSnapshot.docs.map(Vote.fromFirestore);\n  return { ...item, votes }\n}\n\nasync function createVote({ collection, itemId, vote }) {\n  const itemRef = firestore.collection(collection).doc(itemId);\n  const votesRef = firestore.collection(collection).doc(itemId).collection(\"votes\");\n  \n  return Promise.all([\n    votesRef.add({\n      vote: vote.vote,\n      comment: vote.comment,\n      email: vote.email,\n    }),\n    itemRef.update({\n      [`votesSummary.${vote.vote}`]: FieldValue.increment(1),\n    })\n  ]);\n}\n\nexport default async ({ tableId, collection, name },{ logging, request }) => {\n  let data;\n  try {\n    const { method, options } = request.body;\n    switch(method) {\n      case \"getStatusOptions\":\n        data = await getStatusOptions({ tableId, collection, name });\n        console.log(\"data: \", data);\n        return { success: true, data };\n      case \"listItems\":\n        data = await listItems({ collection, status: options.status });\n        return { success: true, data };\n      case \"getItem\":\n        data = await getItem({ collection, itemId: options.itemId });\n        return { success: true, data };\n      case \"createVote\":\n        await createVote({ collection, itemId: options.itemId, vote: options.vote });\n        return { success: true }\n        break;\n      default:\n        return { success: false, error: \"Unsupported method\" };\n    }\n  } catch(error) {\n    return { success: false, error }\n  }\n}\n\nconst roadmapSchema = {\n  \"columns\": {\n    \"description\": {\n      \"config\": {},\n      \"fieldName\": \"description\",\n      \"index\": 1,\n      \"key\": \"description\",\n      \"name\": \"Description\",\n      \"type\": \"LONG_TEXT\"\n    },\n    \"feature\": {\n      \"config\": {\n        \"required\": true\n      },\n      \"fieldName\": \"feature\",\n      \"fixed\": true,\n      \"index\": 0,\n      \"key\": \"feature\",\n      \"name\": \"Feature\",\n      \"type\": \"SIMPLE_TEXT\"\n    },\n    \"status\": {\n      \"config\": {\n        \"colors\": [\n          {\n            \"dark\": \"#2e7d32\",\n            \"light\": \"#4caf50\",\n            \"main\": \"#388e3c\",\n            \"name\": \"complete\"\n          },\n          {\n            \"dark\": \"#d07e04\",\n            \"light\": \"#ffeb3b\",\n            \"main\": \"#fbc02d\",\n            \"name\": \"in_progress\"\n          },\n          {\n            \"dark\": \"#007fc5\",\n            \"light\": \"#03a9f4\",\n            \"main\": \"#0b8ed6\",\n            \"name\": \"next\"\n          },\n          {\n            \"dark\": \"#c0360a\",\n            \"light\": \"#ff5722\",\n            \"main\": \"#e64a19\",\n            \"name\": \"need_feedback\"\n          }\n        ],\n        \"freeText\": true,\n        \"options\": [\"Need feedback\", \"Next\", \"In Progress\", \"Complete\"]\n      },\n      \"fieldName\": \"status\",\n      \"index\": 2,\n      \"key\": \"status\",\n      \"name\": \"Status\",\n      \"type\": \"SINGLE_SELECT\"\n    },\n    \"targetRelease\": {\n      \"config\": {\n        \"format\": \"MMM yy\"\n      },\n      \"fieldName\": \"targetRelease\",\n      \"index\": 3,\n      \"key\": \"targetRelease\",\n      \"name\": \"Target Release\",\n      \"type\": \"DATE\"\n    },\n    \"timelog\": {\n      \"config\": {\n        \"parentLabel\": [\"feature\"]\n      },\n      \"fieldName\": \"timelog\",\n      \"index\": 7,\n      \"key\": \"timelog\",\n      \"name\": \"Timelog\",\n      \"type\": \"SUB_TABLE\"\n    },\n    \"totalVotes\": {\n      \"config\": {\n        \"formulaFn\": \"const formula:Formula = async ({ row })=> {\\n  // WRITE YOUR CODE ONLY BELOW THIS LINE. DO NOT WRITE CODE/COMMENTS OUTSIDE THE FUNCTION BODY\\n  return row.votesSummary.Yes-row.votesSummary.Meh+row.votesSummary.Urgent*2\\n  // Example:\\n  // return row.a + row.b;\\n  // WRITE YOUR CODE ONLY ABOVE THIS LINE. DO NOT WRITE CODE/COMMENTS OUTSIDE THE FUNCTION BODY\\n}\\n\",\n        \"listenerFields\": [\"votesSummary\"],\n        \"renderFieldType\": \"NUMBER\"\n      },\n      \"fieldName\": \"totalVotes\",\n      \"index\": 4,\n      \"key\": \"totalVotes\",\n      \"name\": \"Total Votes\",\n      \"type\": \"FORMULA\"\n    },\n    \"votesSummary\": {\n      \"config\": {\n        \"defaultValue\": {\n          \"type\": \"static\",\n          \"value\": {\n            \"Meh\": 0,\n            \"Urgent\": 0,\n            \"Yes\": 0,\n            \"votesCount\": 0\n          }\n        }\n      },\n      \"fieldName\": \"votesSummary\",\n      \"index\": 5,\n      \"key\": \"votesSummary\",\n      \"name\": \"votesSummary\",\n      \"type\": \"JSON\"\n    },\n    \"_createdBy\": {\n      \"config\": {},\n      \"fieldName\": \"_createdBy\",\n      \"index\": 9,\n      \"key\": \"_createdBy\",\n      \"name\": \"Created By\",\n      \"type\": \"CREATED_BY\"\n    },\n    \"_updatedBy.timestamp\": {\n      \"config\": {},\n      \"fieldName\": \"_updatedBy.timestamp\",\n      \"index\": 11,\n      \"key\": \"_updatedBy.timestamp\",\n      \"name\": \"Updated At\",\n      \"type\": \"UPDATED_AT\"\n    },\n    \"votes\": {\n      \"config\": {\n        \"parentLabel\": [\"feature\"]\n      },\n      \"fieldName\": \"votes\",\n      \"index\": 6,\n      \"key\": \"votes\",\n      \"name\": \"Votes\",\n      \"type\": \"SUB_TABLE\"\n    },\n    \"_createdBy.timestamp\": {\n      \"config\": {},\n      \"fieldName\": \"_createdBy.timestamp\",\n      \"index\": 10,\n      \"key\": \"_createdBy.timestamp\",\n      \"name\": \"Created At\",\n      \"type\": \"CREATED_AT\"\n    },\n    \"_updatedBy\": {\n      \"config\": {},\n      \"fieldName\": \"_updatedBy\",\n      \"index\": 8,\n      \"key\": \"_updatedBy\",\n      \"name\": \"Updated By\",\n      \"type\": \"UPDATED_BY\"\n    }\n  },\n  \"rowHeight\": 65,\n};\n\nconst votesSchema = {\n  \"columns\": {\n    \"comment\": {\n      \"config\": {},\n      \"fieldName\": \"comment\",\n      \"index\": 1,\n      \"key\": \"comment\",\n      \"name\": \"Comment\",\n      \"type\": \"LONG_TEXT\"\n    },\n    \"vote\": {\n      \"config\": {\n        \"colors\": [\n          {\n            \"dark\": \"#0a59a8\",\n            \"light\": \"#2196f3\",\n            \"main\": \"#1976d2\",\n            \"name\": \"urgent\"\n          },\n          {\n            \"dark\": \"#c0360a\",\n            \"light\": \"#ff5722\",\n            \"main\": \"#e64a19\",\n            \"name\": \"meh\"\n          },\n          {\n            \"dark\": \"#258493\",\n            \"light\": \"#00bcd4\",\n            \"main\": \"#0097a7\",\n            \"name\": \"yes\"\n          },\n        ],\n        \"options\": [\"Urgent\", \"Meh\", \"Yes\"]\n      },\n      \"fieldName\": \"vote\",\n      \"index\": 0,\n      \"key\": \"vote\",\n      \"name\": \"vote\",\n      \"type\": \"SINGLE_SELECT\"\n    },\n    \"targetRelease\": {\n      \"config\": {},\n      \"fieldName\": \"email\",\n      \"index\": 2,\n      \"key\": \"email\",\n      \"name\": \"Email\",\n      \"type\": \"EMAIL\"\n    },\n  },\n  \"rowHeight\": 65,\n}\n\nconst tableSettings = ({ tableId, collection, name }) => ({\n  \"id\": tableId,\n  \"collection\": collection,\n  \"name\": name || \"Roadmap\",\n  \"audit\": true,\n  \"auditFieldCreatedBy\": \"_createdBy\",\n  \"auditFieldUpdatedBy\": \"_updatedBy\",\n  \"description\": \"Roadmap voting app to collect votes and feedback from your users.\",\n  \"details\": \"Full setup [documentation](https://github.com/rowyio/roadmap)\\n\\nTry [Roadmap App](https://roadmap.rowy.io/)\\n\\n**Notes**\\n- Change the `Status` column settings to add any category\\n- Subtable`Votes` has the individual user votes for a feature\",\n  \"readOnly\": false,\n  \"roles\": [\"ADMIN\", \"EDITOR\", \"OWNER\"],\n  \"section\": \"Demo App 🎭\",\n  \"tableType\": \"primaryCollection\",\n  \"thumbnailURL\": \"https://firebasestorage.googleapis.com/v0/b/tryrowy.appspot.com/o/__thumbnails__%2Froadmap?alt=media&token=cde9910e-9b8c-4e0e-8ffa-237b52d16e8f\"\n});\n"
+    },
+    {
+      "id": "1707613794785",
+      "description": "The Return Node is used to return values from the workflow. It is generally the last node in the workflow. The return node is optional as the API can inherently return a 200 OK response by default. [Full Documentation](https://docs.buildship.com/core-nodes/return).",
+      "inputs": {
         "type": "object",
         "properties": {
           "status": {
+            "title": "Status code",
             "type": "string",
             "description": "The HTTP status code to return",
-            "title": "Status code",
             "buildship": {
+              "index": 0,
               "options": [
-                { "label": "OK (200)", "value": "200" },
-                { "label": "Created (201)", "value": "201" },
-                { "label": "Accepted (202)", "value": "202" },
+                { "value": "200", "label": "OK (200)" },
+                { "value": "201", "label": "Created (201)" },
+                { "value": "202", "label": "Accepted (202)" },
                 { "value": "301", "label": "Redirect (301)" },
-                { "value": "204", "label": "No Content (204)" },
+                { "label": "No Content (204)", "value": "204" },
                 { "value": "400", "label": "Bad Request (400)" },
                 { "label": "Unauthorized (401)", "value": "401" },
-                { "value": "403", "label": "Forbidden (403)" },
+                { "label": "Forbidden (403)", "value": "403" },
                 { "value": "404", "label": "Not Found (404)" },
-                { "label": "Internal Server Error (500)", "value": "500" }
-              ],
-              "index": 0
+                { "value": "500", "label": "Internal Server Error (500)" }
+              ]
             },
+            "default": "200",
             "enum": [
               "200",
               "201",
@@ -107,53 +106,152 @@
               "403",
               "404",
               "500"
-            ],
-            "default": "200"
+            ]
+          },
+          "cacheMaxAge": {
+            "type": "number",
+            "title": "Cache Time",
+            "buildship": { "index": 2 },
+            "description": "Set cache duration in seconds",
+            "default": 0
           },
           "value": {
             "type": "string",
+            "buildship": { "index": 1 },
             "default": "",
             "description": "The value to return",
-            "title": "Value",
-            "buildship": { "index": 1 }
-          },
-          "cacheMaxAge": {
-            "title": "Cache Time",
-            "description": "Set cache duration in seconds",
-            "type": "number",
-            "default": 0,
-            "buildship": { "index": 2 }
+            "title": "Value"
           }
-        }
+        },
+        "required": []
       },
       "response": {
         "200": {
           "title": "data",
-          "description": "",
-          "buildship": { "index": 0 }
+          "buildship": { "index": 0 },
+          "description": ""
         }
       },
-      "label": "Return"
+      "label": "Return",
+      "type": "return"
     }
   ],
   "trigger": {
-    "instruction": {
-      "bodyTemplate": "https://{{runtimeUrl}}/{{httpPath}}",
-      "title": "Endpoint URL"
+    "script": "",
+    "label": "Rest API Call",
+    "inputs": {
+      "required": ["method", "path"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The path of the API Endpoint. Additionally, define the structure for the incoming API requests. [Learn more about API Specification here](https://docs.buildship.com/basics/api-spec#request-specification).",
+          "default": "/",
+          "buildship": { "index": 0, "sensitive": false },
+          "pattern": "",
+          "title": "Path"
+        },
+        "method": {
+          "pattern": "",
+          "type": "string",
+          "title": "Method",
+          "buildship": {
+            "index": 1,
+            "options": [
+              { "label": "GET", "value": "GET" },
+              { "value": "POST", "label": "POST" },
+              { "value": "PUT", "label": "PUT" },
+              { "value": "DELETE", "label": "DELETE" }
+            ],
+            "sensitive": false
+          },
+          "enum": ["GET", "POST", "PUT", "DELETE"],
+          "default": "GET",
+          "description": "The HTTP method for the incoming request."
+        }
+      },
+      "type": "object"
+    },
+    "request": {
+      "title": "Request",
+      "type": "object",
+      "required": [],
+      "buildship": {},
+      "properties": {
+        "body": {
+          "type": "object",
+          "buildship": {},
+          "title": "Body",
+          "properties": {},
+          "description": "Body of the request"
+        },
+        "query": {
+          "description": "Query parameters",
+          "title": "Query",
+          "type": "object",
+          "properties": {},
+          "buildship": {}
+        },
+        "headers": {
+          "properties": {},
+          "description": "Headers of the request",
+          "type": "object",
+          "buildship": {},
+          "title": "Request Headers"
+        }
+      }
+    },
+    "dependencies": {},
+    "output": {
+      "properties": {
+        "query": {
+          "description": "Query parameters",
+          "title": "Query parameters",
+          "type": "object",
+          "buildship": { "index": 0 }
+        },
+        "body": {
+          "title": "Body",
+          "description": "Body of the request",
+          "type": "object",
+          "buildship": { "index": 1 }
+        },
+        "headers": {
+          "title": "Headers",
+          "buildship": {},
+          "type": "object",
+          "properties": {
+            "authorization": {
+              "description": "Authorization header",
+              "buildship": { "index": 1 },
+              "type": "string",
+              "title": "Authorization"
+            },
+            "content-type": {
+              "description": "Content-Type of the request",
+              "type": "string",
+              "buildship": { "index": 0 },
+              "title": "Content-Type"
+            }
+          },
+          "description": "Headers of the request"
+        }
+      },
+      "title": "Request",
+      "type": "object",
+      "buildship": {}
     },
     "meta": {
       "id": "http",
-      "icon": {},
+      "name": "Rest API Call",
       "description": "Create an API / HTTP endpoint as the trigger or starting point for your workflow. This endpoint can be used in other apps to run the workflow. [Full documentation](https://docs.buildship.com/trigger-nodes/rest-api)",
-      "name": "Rest API Call"
+      "icon": {}
     },
-    "id": "http",
     "testingSchema": [
       {
+        "name": "endpointURL",
         "type": "shortText",
         "label": "Endpoint URL",
         "disabled": true,
-        "name": "endpointURL",
         "prefill": "endpointURL"
       },
       {
@@ -162,111 +260,13 @@
         "type": "apiRequestData"
       }
     ],
-    "inputs": {
-      "properties": {
-        "method": {
-          "pattern": "",
-          "buildship": {
-            "sensitive": false,
-            "options": [
-              { "label": "GET", "value": "GET" },
-              { "value": "POST", "label": "POST" },
-              { "value": "PUT", "label": "PUT" },
-              { "value": "DELETE", "label": "DELETE" }
-            ],
-            "index": 1
-          },
-          "type": "string",
-          "title": "Method",
-          "description": "The HTTP method for the incoming request.",
-          "default": "GET",
-          "enum": ["GET", "POST", "PUT", "DELETE"]
-        },
-        "path": {
-          "buildship": { "index": 0, "sensitive": false },
-          "description": "The path of the API Endpoint. Additionally, define the structure for the incoming API requests. [Learn more about API Specification here](https://docs.buildship.com/basics/api-spec#request-specification).",
-          "type": "string",
-          "title": "Path",
-          "pattern": "",
-          "default": "/"
-        }
-      },
-      "required": ["method", "path"],
-      "type": "object"
-    },
-    "label": "Rest API Call",
-    "output": {
-      "title": "Request",
-      "buildship": {},
-      "type": "object",
-      "properties": {
-        "body": {
-          "title": "Body",
-          "description": "Body of the request",
-          "type": "object",
-          "buildship": { "index": 1 }
-        },
-        "query": {
-          "description": "Query parameters",
-          "buildship": { "index": 0 },
-          "type": "object",
-          "title": "Query parameters"
-        },
-        "headers": {
-          "properties": {
-            "content-type": {
-              "title": "Content-Type",
-              "buildship": { "index": 0 },
-              "type": "string",
-              "description": "Content-Type of the request"
-            },
-            "authorization": {
-              "title": "Authorization",
-              "description": "Authorization header",
-              "buildship": { "index": 1 },
-              "type": "string"
-            }
-          },
-          "type": "object",
-          "buildship": {},
-          "title": "Headers",
-          "description": "Headers of the request"
-        }
-      }
-    },
-    "request": {
-      "required": [],
-      "buildship": {},
-      "type": "object",
-      "title": "Request",
-      "properties": {
-        "query": {
-          "title": "Query",
-          "type": "object",
-          "description": "Query parameters",
-          "buildship": {},
-          "properties": {}
-        },
-        "body": {
-          "title": "Body",
-          "buildship": {},
-          "properties": {},
-          "type": "object",
-          "description": "Body of the request"
-        },
-        "headers": {
-          "type": "object",
-          "description": "Headers of the request",
-          "buildship": {},
-          "title": "Request Headers",
-          "properties": {}
-        }
-      }
-    },
-    "live": true,
-    "script": "",
     "type": "http",
-    "dependencies": {}
+    "id": "http",
+    "live": true,
+    "instruction": {
+      "bodyTemplate": "https://{{runtimeUrl}}/{{httpPath}}",
+      "title": "Endpoint URL"
+    }
   },
   "nodeValues": {
     "1707499649394": {
@@ -276,9 +276,9 @@
     },
     "1707776243971": { "queryParams": {}, "method": "" },
     "1707770335047": {
-      "tableId": "roadmap4",
-      "name": "Roadmap 4",
-      "collection": "roadmap4"
+      "tableId": "roadmap",
+      "name": "Roadmap",
+      "collection": "roadmap"
     },
     "1707776283899": { "merge": false },
     "test-node-1707770335047": {
@@ -298,7 +298,7 @@
       "value": "",
       "status": "200"
     },
-    "http": { "method": "POST", "path": "/roadmap" },
+    "http": { "method": "POST", "path": "/roadmap-" },
     "test-node-1707776283899": { "merge": false },
     "test-node-1707499879396": {
       "cacheMaxAge": 0,
